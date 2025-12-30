@@ -317,25 +317,42 @@ async Task Example4_AsyncVoidVsAsyncTask()
     Console.WriteLine("▶ 【async void 的問題 - 例外無法被捕捉】");
     Console.WriteLine("   EventHandler += BadAsyncVoid;  // ❌ 例外會導致應用崩潰");
     Console.WriteLine("   我們無法用 try-catch 捕捉它");
+    Console.WriteLine("   (為了演示不讓程式崩潰，此處使用特殊 Context 攔截該致命錯誤)");
     Console.WriteLine();
 
-    // 設置全局例外處理
-    AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
-    {
-        exceptionCount++;
-        Console.WriteLine($"   ⚠️  全局例外捕捉: {e.ExceptionObject}");
-    };
+    // 保存當前上下文
+    var originalContext = SynchronizationContext.Current;
+    // 設置攔截上下文
+    var safeContext = new SafeAsyncVoidContext();
+    SynchronizationContext.SetSynchronizationContext(safeContext);
 
-    Console.WriteLine("   執行 async void...");
     try
     {
+        Console.WriteLine("   執行 async void...");
         BadAsyncVoid();
-        // 讓 async void 有時間執行和拋出例外
-        await Task.Delay(100);
+        
+        // 等待 async void 執行並拋出例外
+        // 因為 async void 是 "fire and forget"，我們只能輪詢檢查上下文是否捕獲到了錯誤
+        for (int i = 0; i < 5; i++)
+        {
+            await Task.Delay(50);
+            if (safeContext.CaughtException != null) break;
+        }
+
+        if (safeContext.CaughtException != null)
+        {
+            Console.WriteLine($"   ⚠️  [模擬崩潰] 系統偵測到未處理例外: {safeContext.CaughtException.Message}");
+            Console.WriteLine("       注意：在正常 Console/WinForm 環境下，這會直接導致程式閃退！");
+        }
+        else
+        {
+            Console.WriteLine("   ❓ 未能及時捕捉到例外 (可能執行過快或被環境吞噬)");
+        }
     }
-    catch (Exception ex)
+    finally
     {
-        Console.WriteLine($"   ✓ 例外被捕捉: {ex.Message}");
+        // 恢復原始上下文
+        SynchronizationContext.SetSynchronizationContext(originalContext);
     }
     Console.WriteLine();
 
@@ -357,6 +374,38 @@ async Task Example4_AsyncVoidVsAsyncTask()
     Console.WriteLine("💡 最佳實踐:");
     Console.WriteLine("   ✓ 使用 async Task（或 async Task<T>）");
     Console.WriteLine("   ✗ 避免使用 async void（僅在事件處理器中使用）");
+}
+
+// ---------------------------------------------------------
+// 輔助類別：用於安全演示 async void 崩潰的 SynchronizationContext
+// ---------------------------------------------------------
+class SafeAsyncVoidContext : SynchronizationContext
+{
+    public Exception? CaughtException { get; private set; }
+
+    public override void Post(SendOrPostCallback d, object? state)
+    {
+        try
+        {
+            d(state);
+        }
+        catch (Exception ex)
+        {
+            CaughtException = ex;
+        }
+    }
+
+    public override void Send(SendOrPostCallback d, object? state)
+    {
+        try
+        {
+            d(state);
+        }
+        catch (Exception ex)
+        {
+            CaughtException = ex;
+        }
+    }
 }
 
 // ============================================
