@@ -343,7 +343,7 @@ async Task Example4_AsyncVoidVsAsyncTask()
     Console.WriteLine("   • Console app: 觸發 UnhandledException → Process Crash");
     Console.WriteLine("   • WPF: 觸發 DispatcherUnhandledException → 可攔截但需設定");
     Console.WriteLine("   • WinForms: 觸發 ThreadException → 可攔截但需設定");
-    Console.WriteLine("   • ASP.NET Core: 例外被吞掉，不會崩潰但會遺失錯誤");
+    Console.WriteLine("   • ASP.NET Core: 無 SynchronizationContext，例外拋到 ThreadPool → 預設會導致 Process Crash");
     Console.WriteLine();
 
     // 保存當前上下文
@@ -550,7 +550,7 @@ async Task Example7_ExceptionHandling()
     // 方式 1: 捕捉所有例外
     Console.WriteLine("▶ 【方式 1: Task.WhenAll + try-catch（只捕捉第一個例外）】");
     Console.WriteLine("   ⚠️  重要：await Task.WhenAll 只拋出「第一個失敗任務」的例外");
-    Console.WriteLine("   如果多個任務失敗，其他例外會被隱藏！");
+    Console.WriteLine("   如果多個任務失敗，await 只拋第一個，但其他例外仍可從各 Task 的 Exception 屬性取得！");
     Console.WriteLine();
     try
     {
