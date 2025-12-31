@@ -202,7 +202,8 @@ async Task Example2_TaskDelaySimulation()
         return $"Data from {resource}";
     }
 
-    Console.WriteLine("▶ 【同步方式 - 順序執行】");
+    Console.WriteLine("▶ 【順序執行（阻塞式等待）】");
+    Console.WriteLine("   說明：用 Thread.Sleep 模擬阻塞式 I/O，在 Task.Run 中執行避免直接阻塞主線程");
     var sw = Stopwatch.StartNew();
     string result1 = await Task.Run(() =>
     {
@@ -375,39 +376,6 @@ async Task Example4_AsyncVoidVsAsyncTask()
     Console.WriteLine("   ✓ 使用 async Task（或 async Task<T>）");
     Console.WriteLine("   ✗ 避免使用 async void（僅在事件處理器中使用）");
 }
-
-// ---------------------------------------------------------
-// 輔助類別：用於安全演示 async void 崩潰的 SynchronizationContext
-// ---------------------------------------------------------
-class SafeAsyncVoidContext : SynchronizationContext
-{
-    public Exception? CaughtException { get; private set; }
-
-    public override void Post(SendOrPostCallback d, object? state)
-    {
-        try
-        {
-            d(state);
-        }
-        catch (Exception ex)
-        {
-            CaughtException = ex;
-        }
-    }
-
-    public override void Send(SendOrPostCallback d, object? state)
-    {
-        try
-        {
-            d(state);
-        }
-        catch (Exception ex)
-        {
-            CaughtException = ex;
-        }
-    }
-}
-
 // ============================================
 // 【範例 5】多任務並行：Task.WhenAll vs 順序等待
 // ============================================
@@ -491,12 +459,12 @@ async Task Example6_RateLimitingWithCancellation()
 
     Console.WriteLine("▶ 【限流執行（每次最多 2 個並行任務）】");
     using var cts = new CancellationTokenSource();
+    using var semaphore = new SemaphoreSlim(2); // 最多 2 個並行任務
 
     // 設置 5 秒後自動取消
     cts.CancelAfter(TimeSpan.FromSeconds(5));
 
     var items = Enumerable.Range(1, 10).ToList();
-    var semaphore = new SemaphoreSlim(2); // 最多 2 個並行任務
 
     try
     {
@@ -816,30 +784,41 @@ async Task Example10_IOBoundVsCPUBound()
     // CPU Bound 示例
     Console.WriteLine("▶ 【CPU Bound 示例】");
 
-    // 計算密集函數
-    long ComputeFactorial(int n)
+    // 計算密集函數（遞迴計算 Fibonacci 數列）
+    long ComputeFibonacci(int n)
     {
-        if (n <= 1) return 1;
-        return n * ComputeFactorial(n - 1);
+        if (n <= 1) return n;
+        return ComputeFibonacci(n - 1) + ComputeFibonacci(n - 2);
     }
 
-    // 同步執行 CPU Bound
+    // 同步執行 CPU Bound（順序計算 3 次）
     sw.Restart();
-    long cpu1 = ComputeFactorial(15);
-    long cpu2 = ComputeFactorial(15);
-    long cpu3 = ComputeFactorial(15);
+    long cpu1 = ComputeFibonacci(35);
+    long cpu2 = ComputeFibonacci(35);
+    long cpu3 = ComputeFibonacci(35);
     sw.Stop();
-    Console.WriteLine($"  同步執行（1個線程）: {sw.ElapsedMilliseconds} ms");
+    long syncCpuTime = sw.ElapsedMilliseconds;
+    Console.WriteLine($"  同步執行（1個線程）: {syncCpuTime} ms");
+    Console.WriteLine($"  結果: {cpu1}, {cpu2}, {cpu3}");
 
     // Task.Run 並行執行（使用多個線程）
     sw.Restart();
     long[] cpuResults = await Task.WhenAll(
-        Task.Run(() => ComputeFactorial(15)),
-        Task.Run(() => ComputeFactorial(15)),
-        Task.Run(() => ComputeFactorial(15))
+        Task.Run(() => ComputeFibonacci(35)),
+        Task.Run(() => ComputeFibonacci(35)),
+        Task.Run(() => ComputeFibonacci(35))
     );
     sw.Stop();
-    Console.WriteLine($"  Task.Run 並行（多線程）: {sw.ElapsedMilliseconds} ms");
+    long parallelCpuTime = sw.ElapsedMilliseconds;
+    Console.WriteLine($"  Task.Run 並行（多線程）: {parallelCpuTime} ms");
+    Console.WriteLine($"  結果: {cpuResults[0]}, {cpuResults[1]}, {cpuResults[2]}");
+
+    // 計算加速比
+    if (parallelCpuTime > 0)
+    {
+        double speedup = (double)syncCpuTime / parallelCpuTime;
+        Console.WriteLine($"  ⚡ 加速比: {speedup:F2}x (理想值接近 CPU 核心數)");
+    }
     Console.WriteLine();
 
     Console.WriteLine("💡 最佳實踐對比:");
@@ -854,4 +833,36 @@ async Task Example10_IOBoundVsCPUBound()
     Console.WriteLine("  │");
     Console.WriteLine("  └─ 混合情況");
     Console.WriteLine("     使用: 兼用 async/await 和 Task.Run");
+}
+
+// ---------------------------------------------------------
+// 輔助類別：用於安全演示 async void 崩潰的 SynchronizationContext
+// ---------------------------------------------------------
+class SafeAsyncVoidContext : SynchronizationContext
+{
+    public Exception? CaughtException { get; private set; }
+
+    public override void Post(SendOrPostCallback d, object? state)
+    {
+        try
+        {
+            d(state);
+        }
+        catch (Exception ex)
+        {
+            CaughtException = ex;
+        }
+    }
+
+    public override void Send(SendOrPostCallback d, object? state)
+    {
+        try
+        {
+            d(state);
+        }
+        catch (Exception ex)
+        {
+            CaughtException = ex;
+        }
+    }
 }
