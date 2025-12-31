@@ -204,9 +204,10 @@ async Task Example2_TaskDelaySimulation()
         return $"Data from {resource}";
     }
 
-    Console.WriteLine("▶ 【順序執行（阻塞式等待）】");
-    Console.WriteLine("   說明：用 Thread.Sleep 模擬阻塞式 I/O，使用 Task.Run 雖不卡住 UI，");
-    Console.WriteLine("         但仍會佔用 ThreadPool 線程（Worker Thread 被阻塞），效率較低。");
+    Console.WriteLine("▶ 【錯誤示範：用 Task.Run 包裝同步阻塞操作】");
+    Console.WriteLine("   說明：用 Thread.Sleep 模擬阻塞式 I/O，雖用 await Task.Run 不卡主執行緒，");
+    Console.WriteLine("         但這只是把阻塞轉移到 ThreadPool 工作線程，並非真正的非同步，效率仍低。");
+    Console.WriteLine("         注意：這不是「同步阻塞主執行緒」，而是「異步等待一個阻塞操作」。");
     var sw = Stopwatch.StartNew();
     string result1 = await Task.Run(() =>
     {
@@ -286,6 +287,22 @@ async Task Example3_AvoidDeadlock()
     Console.WriteLine($"   ✓ {result}，耗時: {sw.ElapsedMilliseconds} ms");
     Console.WriteLine();
 
+    Console.WriteLine("▶ 【正確做法 2: 使用 ConfigureAwait(false)（函式庫最佳實踐）】");
+    Console.WriteLine("   說明：ConfigureAwait(false) 不會嘗試回到原 SynchronizationContext，");
+    Console.WriteLine("         可避免死鎖，也能提升效能（適合函式庫程式碼）。");
+    Console.WriteLine();
+    async Task<string> GetDataWithConfigureAwaitAsync()
+    {
+        await Task.Delay(100).ConfigureAwait(false);
+        return "Data retrieved with ConfigureAwait";
+    }
+    sw.Restart();
+    string resultConfigureAwait = await GetDataWithConfigureAwaitAsync();
+    sw.Stop();
+    Console.WriteLine($"   ✓ {resultConfigureAwait}，耗時: {sw.ElapsedMilliseconds} ms");
+    Console.WriteLine("   💡 在函式庫程式碼中，若不需回到原 SynchronizationContext，建議使用 ConfigureAwait(false)");
+    Console.WriteLine();
+
     Console.WriteLine("▶ 【替代做法 (Legacy): 使用 Task.Run 在背景線程】");
     sw.Restart();
     // 注意：這只是繞過死鎖的 Workaround，仍有問題！
@@ -301,8 +318,10 @@ async Task Example3_AvoidDeadlock()
     Console.WriteLine();
 
     Console.WriteLine("💡 記住:");
-    Console.WriteLine("   ✓ 使用 await");
-    Console.WriteLine("   ✗ 使用 .Result 或 .Wait()");
+    Console.WriteLine("   ✓ 應用程式碼：使用 await");
+    Console.WriteLine("   ✓ 函式庫程式碼（通常）：使用 await ... ConfigureAwait(false)");
+    Console.WriteLine("     （除非需要回到特定的 SynchronizationContext）");
+    Console.WriteLine("   ✗ 避免使用 .Result 或 .Wait()");
 }
 
 // ============================================
@@ -343,7 +362,7 @@ async Task Example4_AsyncVoidVsAsyncTask()
     Console.WriteLine("   • Console app: 觸發 UnhandledException → Process Crash");
     Console.WriteLine("   • WPF: 觸發 DispatcherUnhandledException → 可攔截但需設定");
     Console.WriteLine("   • WinForms: 觸發 ThreadException → 可攔截但需設定");
-    Console.WriteLine("   • ASP.NET Core: 無 SynchronizationContext，例外拋到 ThreadPool → 可能導致程序崩潰（取決於宿主設定）");
+    Console.WriteLine("   • ASP.NET Core: 無 SynchronizationContext，例外拋到 ThreadPool → 行為依版本/宿主/設定不同，可能導致崩潰");
     Console.WriteLine();
 
     // 保存當前上下文
@@ -549,8 +568,9 @@ async Task Example7_ExceptionHandling()
 
     // 方式 1: 捕捉所有例外
     Console.WriteLine("▶ 【方式 1: Task.WhenAll + try-catch（只捕捉第一個例外）】");
-    Console.WriteLine("   ⚠️  重要：await Task.WhenAll 只拋出「第一個失敗任務」的例外");
-    Console.WriteLine("   如果多個任務失敗，await 只拋第一個，但其他例外仍可從各 Task 的 Exception 屬性取得！");
+    Console.WriteLine("   ⚠️  重要：Task.WhenAll 會將多個失敗例外包成 AggregateException");
+    Console.WriteLine("   但 await 會展開它，只拋出第一個 InnerException");
+    Console.WriteLine("   其他例外可從 Task.WhenAll 回傳的 task.Exception.InnerExceptions 取得");
     Console.WriteLine();
     try
     {
@@ -566,7 +586,7 @@ async Task Example7_ExceptionHandling()
     catch (HttpRequestException ex)
     {
         Console.WriteLine($"  ❌ 捕捉到例外: {ex.Message}");
-        Console.WriteLine("     （注意：如有其他任務也失敗，其例外會被忽略）");
+        Console.WriteLine("     （注意：如有其他任務也失敗，在此 catch 中看不到，但可從各 Task 物件取得）");
     }
     Console.WriteLine();
 
