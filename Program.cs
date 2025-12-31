@@ -303,18 +303,21 @@ async Task Example3_AvoidDeadlock()
     Console.WriteLine("   💡 在函式庫程式碼中，若不需回到原 SynchronizationContext，建議使用 ConfigureAwait(false)");
     Console.WriteLine();
 
-    Console.WriteLine("▶ 【替代做法 (Legacy): 使用 Task.Run 在背景線程】");
+    Console.WriteLine("▶ 【❌ 錯誤做法：Task.Run 包裝 .Result（反模式）】");
+    Console.WriteLine("   ⚠️  警告：以下程式碼是「錯誤示範」，僅用於說明為何不應這樣做！");
+    Console.WriteLine();
     sw.Restart();
-    // 注意：這只是繞過死鎖的 Workaround，仍有問題！
+    // ❌ 反模式：用 Task.Run 包裝 .Result 只是把問題藏起來
     string resultFromRun = await Task.Run(() => GetDataAsync().Result);
     sw.Stop();
-    Console.WriteLine($"   ✓ {resultFromRun}，耗時: {sw.ElapsedMilliseconds} ms");
+    Console.WriteLine($"   結果: {resultFromRun}，耗時: {sw.ElapsedMilliseconds} ms");
     Console.WriteLine();
-    Console.WriteLine("   ⚠️  這個做法的問題:");
-    Console.WriteLine("   1. 仍會「同步阻塞」一個 ThreadPool 線程");
+    Console.WriteLine("   ❌ 為什麼這是錯誤做法:");
+    Console.WriteLine("   1. 仍會「同步阻塞」一個 ThreadPool 線程（問題只是轉移，沒有解決）");
     Console.WriteLine("   2. 例外會被包在 AggregateException，需額外處理");
     Console.WriteLine("   3. 浪費線程資源（用一個線程等待另一個 async 操作）");
-    Console.WriteLine("   4. 這只是無法改用 await 時的「最後手段」");
+    Console.WriteLine("   4. 改變了例外傳播行為，增加除錯難度");
+    Console.WriteLine("   5. 這不是「替代做法」，而是「反模式」，不應在生產環境使用！");
     Console.WriteLine();
 
     Console.WriteLine("💡 記住:");

@@ -215,10 +215,10 @@ ProcessData();
 
 ```csharp
 // ❌ 無並行，無性能提升
-public async Task<long> Compute() => Fibonacci(30);
+public async Task<long> Compute() => Fibonacci(35);
 
 // ✓ 正確
-public Task<long> Compute() => Task.Run(() => Fibonacci(30));
+public Task<long> Compute() => Task.Run(() => Fibonacci(35));
 ```
 
 ### 陷阱 5：誤解 Task.WhenAll 的例外處理

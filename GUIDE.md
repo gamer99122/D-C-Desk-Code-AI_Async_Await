@@ -660,7 +660,7 @@ public async Task<string> FetchDataAsync()
 | 非同步並行 | ~500ms | 3 個並行 |
 | **加速倍數** | **3x** | |
 
-### CPU Bound 效能對比（計算 Fibonacci(30)）
+### CPU Bound 效能對比（計算 Fibonacci(35)）
 
 | 方式 | 耗時 | CPU 使用 |
 |-----|------|----------|
