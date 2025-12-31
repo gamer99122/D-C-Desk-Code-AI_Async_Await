@@ -7,6 +7,8 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+
 Console.WriteLine("╔════════════════════════════════════════════════════╗");
 Console.WriteLine("║    .NET 10 同步 vs 非同步教學示範 (Async/Await)     ║");
 Console.WriteLine("╚════════════════════════════════════════════════════╝");
@@ -88,7 +90,7 @@ while (running)
             Console.WriteLine(new string('=', 60));
             Console.Write("按 Enter 返回菜單...");
             Console.ReadLine();
-            Console.Clear();
+            try { Console.Clear(); } catch { }
         }
     }
     else
@@ -122,7 +124,7 @@ async Task Example1_FileSyncVsAsync()
 
     // 創建測試檔案
     string testFilePath = Path.Combine(Path.GetTempPath(), "test_file.txt");
-    string testContent = string.Concat(Enumerable.Range(1, 1000).Select(i => $"Line {i}\n"));
+    string testContent = string.Concat(Enumerable.Range(1, 50000).Select(i => $"Line {i}\n"));
     File.WriteAllText(testFilePath, testContent);
 
     try
@@ -203,12 +205,13 @@ async Task Example2_TaskDelaySimulation()
     }
 
     Console.WriteLine("▶ 【順序執行（阻塞式等待）】");
-    Console.WriteLine("   說明：用 Thread.Sleep 模擬阻塞式 I/O，在 Task.Run 中執行避免直接阻塞主線程");
+    Console.WriteLine("   說明：用 Thread.Sleep 模擬阻塞式 I/O，使用 Task.Run 雖不卡住 UI，");
+    Console.WriteLine("         但仍會佔用 ThreadPool 線程（Worker Thread 被阻塞），效率較低。");
     var sw = Stopwatch.StartNew();
     string result1 = await Task.Run(() =>
     {
         Console.WriteLine("  ⏳ 正在獲取 Resource1... (等待 1000ms)");
-        Thread.Sleep(1000);
+        Thread.Sleep(1000); // 佔用線程 1 秒
         return "Data from Resource1";
     });
     string result2 = await Task.Run(() =>
@@ -243,12 +246,16 @@ async Task Example3_AvoidDeadlock()
     Console.WriteLine("【範例 3】避免使用 .Result / .Wait() 導致死鎖");
     Console.WriteLine();
     Console.WriteLine("📌 情境說明:");
-    Console.WriteLine("   在同步上下文中調用 async 方法，用 .Result 或 .Wait() 會導致死鎖。");
+    Console.WriteLine("   在有 SynchronizationContext 的環境中（如 UI app），");
+    Console.WriteLine("   用 .Result 或 .Wait() 會導致死鎖。Console app 通常只會阻塞。");
     Console.WriteLine("   正確做法是使用 await。");
     Console.WriteLine();
-    Console.WriteLine("❌ 危險做法（會導致死鎖）:");
+    Console.WriteLine("❌ 危險做法:");
     Console.WriteLine("   async Task<string> GetDataAsync() => ... ");
-    Console.WriteLine("   string data = GetDataAsync().Result;  // ❌ 可能死鎖！");
+    Console.WriteLine("   string data = GetDataAsync().Result;");
+    Console.WriteLine("   - Console app: 阻塞線程（但通常不死鎖）");
+    Console.WriteLine("   - UI app (WPF/WinForms): 死鎖！");
+    Console.WriteLine("   - ASP.NET (舊版): 死鎖！");
     Console.WriteLine();
 
     async Task<string> GetDataAsync()
@@ -258,12 +265,17 @@ async Task Example3_AvoidDeadlock()
     }
 
     // 演示危險的做法（但我們不會真的執行它）
-    Console.WriteLine("▶ 【错误做法的解释】");
-    Console.WriteLine("   如果在同步上下文中使用 .Result:");
-    Console.WriteLine("   - 線程被阻塞在 .Result");
-    Console.WriteLine("   - async 方法需要回到原線程上下文執行 (SynchronizationContext)");
-    Console.WriteLine("   - 原線程被阻塞，無法執行 async 方法");
-    Console.WriteLine("   - 結果: 死鎖！");
+    Console.WriteLine("▶ 【錯誤做法的解釋】");
+    Console.WriteLine("   死鎖發生條件（需同時滿足）:");
+    Console.WriteLine("   1. 有 SynchronizationContext (UI app, 舊版 ASP.NET)");
+    Console.WriteLine("   2. 線程被阻塞在 .Result/.Wait()");
+    Console.WriteLine("   3. async 方法試圖回到原 SynchronizationContext");
+    Console.WriteLine("   4. 原線程被阻塞，無法執行 continuation → 死鎖");
+    Console.WriteLine();
+    Console.WriteLine("   Console app 為什麼通常不死鎖？");
+    Console.WriteLine("   - 預設 SynchronizationContext.Current == null");
+    Console.WriteLine("   - continuation 在 ThreadPool 執行，不依賴原線程");
+    Console.WriteLine("   - 但仍會「阻塞線程」，這是不好的做法！");
     Console.WriteLine();
 
     // 演示正確的做法
@@ -274,12 +286,18 @@ async Task Example3_AvoidDeadlock()
     Console.WriteLine($"   ✓ {result}，耗時: {sw.ElapsedMilliseconds} ms");
     Console.WriteLine();
 
-    Console.WriteLine("▶ 【正確做法 2: 使用 Task.Run 在背景線程】");
+    Console.WriteLine("▶ 【替代做法 (Legacy): 使用 Task.Run 在背景線程】");
     sw.Restart();
+    // 注意：這只是繞過死鎖的 Workaround，仍有問題！
     string resultFromRun = await Task.Run(() => GetDataAsync().Result);
     sw.Stop();
     Console.WriteLine($"   ✓ {resultFromRun}，耗時: {sw.ElapsedMilliseconds} ms");
-    Console.WriteLine("   ℹ️  Task.Run 在背景線程執行，不會死鎖");
+    Console.WriteLine();
+    Console.WriteLine("   ⚠️  這個做法的問題:");
+    Console.WriteLine("   1. 仍會「同步阻塞」一個 ThreadPool 線程");
+    Console.WriteLine("   2. 例外會被包在 AggregateException，需額外處理");
+    Console.WriteLine("   3. 浪費線程資源（用一個線程等待另一個 async 操作）");
+    Console.WriteLine("   4. 這只是無法改用 await 時的「最後手段」");
     Console.WriteLine();
 
     Console.WriteLine("💡 記住:");
@@ -299,8 +317,6 @@ async Task Example4_AsyncVoidVsAsyncTask()
     Console.WriteLine("   誤用 async void 會導致例外無法被捕捉。");
     Console.WriteLine();
 
-    int exceptionCount = 0;
-
     // ❌ async void - 例外無法被捕捉
     async void BadAsyncVoid()
     {
@@ -318,7 +334,16 @@ async Task Example4_AsyncVoidVsAsyncTask()
     Console.WriteLine("▶ 【async void 的問題 - 例外無法被捕捉】");
     Console.WriteLine("   EventHandler += BadAsyncVoid;  // ❌ 例外會導致應用崩潰");
     Console.WriteLine("   我們無法用 try-catch 捕捉它");
-    Console.WriteLine("   (為了演示不讓程式崩潰，此處使用特殊 Context 攔截該致命錯誤)");
+    Console.WriteLine();
+    Console.WriteLine("   ⚠️  教學環境說明:");
+    Console.WriteLine("   - 為了演示，我們使用「自訂 SynchronizationContext」攔截例外");
+    Console.WriteLine("   - 這只是教學模擬，真實環境的行為更嚴重:");
+    Console.WriteLine();
+    Console.WriteLine("   真實環境的 async void 例外:");
+    Console.WriteLine("   • Console app: 觸發 UnhandledException → Process Crash");
+    Console.WriteLine("   • WPF: 觸發 DispatcherUnhandledException → 可攔截但需設定");
+    Console.WriteLine("   • WinForms: 觸發 ThreadException → 可攔截但需設定");
+    Console.WriteLine("   • ASP.NET Core: 例外被吞掉，不會崩潰但會遺失錯誤");
     Console.WriteLine();
 
     // 保存當前上下文
@@ -440,6 +465,12 @@ async Task Example6_RateLimitingWithCancellation()
     Console.WriteLine("   - 控制 CPU/記憶體使用");
     Console.WriteLine("   - 避免對伺服器造成過大壓力");
     Console.WriteLine();
+    Console.WriteLine("❓ 什麼是協作式取消 (Cooperative Cancellation)？");
+    Console.WriteLine("   - CancellationToken 不會「強制終止」任務");
+    Console.WriteLine("   - 任務必須「主動檢查」token 並配合停止");
+    Console.WriteLine("   - 如: await Task.Delay(ms, ct) 會檢查取消");
+    Console.WriteLine("   - 取消後可能會看到「部分完成/部分取消」，這是正常的");
+    Console.WriteLine();
 
     async Task<int> ProcessItem(int id, int delayMs, CancellationToken ct)
     {
@@ -461,8 +492,8 @@ async Task Example6_RateLimitingWithCancellation()
     using var cts = new CancellationTokenSource();
     using var semaphore = new SemaphoreSlim(2); // 最多 2 個並行任務
 
-    // 設置 5 秒後自動取消
-    cts.CancelAfter(TimeSpan.FromSeconds(5));
+    // 設置 1 秒後自動取消 (確保能觸發取消)
+    cts.CancelAfter(TimeSpan.FromSeconds(1));
 
     var items = Enumerable.Range(1, 10).ToList();
 
@@ -517,7 +548,10 @@ async Task Example7_ExceptionHandling()
     }
 
     // 方式 1: 捕捉所有例外
-    Console.WriteLine("▶ 【方式 1: Task.WhenAll + try-catch（第一個例外）】");
+    Console.WriteLine("▶ 【方式 1: Task.WhenAll + try-catch（只捕捉第一個例外）】");
+    Console.WriteLine("   ⚠️  重要：await Task.WhenAll 只拋出「第一個失敗任務」的例外");
+    Console.WriteLine("   如果多個任務失敗，其他例外會被隱藏！");
+    Console.WriteLine();
     try
     {
         var tasks = new[]
@@ -532,10 +566,11 @@ async Task Example7_ExceptionHandling()
     catch (HttpRequestException ex)
     {
         Console.WriteLine($"  ❌ 捕捉到例外: {ex.Message}");
+        Console.WriteLine("     （注意：如有其他任務也失敗，其例外會被忽略）");
     }
     Console.WriteLine();
 
-    // 方式 2: 使用 Task.WhenAllAsync 查看所有結果
+    // 方式 2: 使用 Task.WhenAll 查看所有結果
     Console.WriteLine("▶ 【方式 2: 單獨檢查每個任務（查看所有結果）】");
     var task1 = FetchDataAsync(1, false);
     var task2 = FetchDataAsync(2, true);
@@ -555,7 +590,7 @@ async Task Example7_ExceptionHandling()
     }));
     Console.WriteLine();
 
-    // 方式 3: 使用 Task.WhenAllAsync 查看已完成任務
+    // 方式 3: 使用 Task.WhenAll 區分成功和失敗任務
     Console.WriteLine("▶ 【方式 3: 區分成功和失敗任務】");
     var tasks2 = new[]
     {
@@ -585,6 +620,31 @@ async Task Example7_ExceptionHandling()
             Console.WriteLine($"  ✓ {result.Message}");
         else
             Console.WriteLine($"  ❌ {result.Message}");
+    }
+    Console.WriteLine();
+
+    // 補充說明：如何獲取所有被隱藏的例外
+    Console.WriteLine("💡 如何獲取 Task.WhenAll 中所有被隱藏的例外？");
+    var tasks3 = new[]
+    {
+        FetchDataAsync(1, false),
+        FetchDataAsync(2, true),   // 會失敗
+        FetchDataAsync(3, true)    // 也會失敗
+    };
+
+    try
+    {
+        await Task.WhenAll(tasks3);
+    }
+    catch
+    {
+        // 檢查每個任務的狀態
+        var faultedTasks = tasks3.Where(t => t.IsFaulted).ToList();
+        Console.WriteLine($"   發現 {faultedTasks.Count} 個失敗的任務:");
+        foreach (var t in faultedTasks)
+        {
+            Console.WriteLine($"   ❌ {t.Exception?.InnerException?.Message}");
+        }
     }
 }
 
@@ -818,6 +878,7 @@ async Task Example10_IOBoundVsCPUBound()
     {
         double speedup = (double)syncCpuTime / parallelCpuTime;
         Console.WriteLine($"  ⚡ 加速比: {speedup:F2}x (理想值接近 CPU 核心數)");
+        Console.WriteLine("  ⚠️ 注意: 實際加速取決於機器 CPU 核心數與當前負載，單核機器無加速效果。");
     }
     Console.WriteLine();
 
