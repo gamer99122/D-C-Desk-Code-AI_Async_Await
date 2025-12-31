@@ -71,13 +71,14 @@ dotnet ./bin/Debug/net10.0/AsyncAwaitTutorial.dll
 - **實用性**：高（實際 Web 應用中常見）
 
 #### 2. 使用 Task.Delay 模擬 I/O 操作
-- **主題**：Task.Delay vs Thread.Sleep
+- **主題**：Task.Delay vs Thread.Sleep 與錯誤示範
 - **關鍵概念**：
   - Thread.Sleep 阻塞線程
   - Task.Delay 不阻塞線程
+  - **錯誤示範**：用 Task.Run 包裝 Thread.Sleep 只是把阻塞轉移到 ThreadPool，並非真正的非同步
   - 順序執行 vs 並行執行的耗時差異
-- **預期輸出**：順序 2000ms，並行 1000ms
-- **實用性**：高（測試非同步代碼的常見方式）
+- **預期輸出**：錯誤示範 2000ms，並行 1000ms
+- **實用性**：高（理解真正的非同步 vs 阻塞轉移）
 
 #### 3. 避免使用 .Result / .Wait() 導致死鎖
 - **主題**：死鎖陷阱和正確做法
@@ -85,8 +86,10 @@ dotnet ./bin/Debug/net10.0/AsyncAwaitTutorial.dll
   - `.Result` / `.Wait()` 阻塞線程
   - async 方法需要回到原線程上下文
   - 線程阻塞 → async 無法執行 → 死鎖
-- **預期輸出**：演示 await 的正確做法
-- **實用性**：非常高（最常見的陷阱）
+  - **正確做法 1**：使用 await
+  - **正確做法 2**：使用 ConfigureAwait(false)（函式庫最佳實踐，避免回到原 SynchronizationContext）
+- **預期輸出**：演示兩種正確做法
+- **實用性**：非常高（最常見的陷阱 + 函式庫開發必備）
 
 #### 4. async void vs async Task
 - **主題**：返回類型選擇的重要性
@@ -120,9 +123,10 @@ dotnet ./bin/Debug/net10.0/AsyncAwaitTutorial.dll
 #### 7. 非同步例外處理與多任務
 - **主題**：多任務執行時的例外策略
 - **關鍵概念**：
-  - Task.WhenAll 遇到例外時的行為
-  - 區分成功和失敗任務
-  - 靈活的例外處理
+  - Task.WhenAll 會將多個失敗例外包成 AggregateException
+  - **重要**：await 會展開 AggregateException，只拋出第一個 InnerException
+  - 其他例外可從 task.Exception.InnerExceptions 取得
+  - 區分成功和失敗任務的不同處理方式
 - **預期輸出**：展示 3 種例外處理方式
 - **實用性**：高（API 聚合、批量操作）
 
@@ -160,9 +164,10 @@ dotnet ./bin/Debug/net10.0/AsyncAwaitTutorial.dll
 | 概念 | 說明 | 使用場景 |
 |------|------|---------|
 | `async Task<T>` | 返回 Task 的非同步方法 | I/O 操作、Web API |
-| `await` | 等待 Task 完成，不阻塞線程 | async 方法內部 |
-| `Task.WhenAll` | 等待所有 Task 完成 | 並行多個操作 |
+| `await` | 等待 Task 完成，不阻塞線程；展開 AggregateException | async 方法內部 |
+| `Task.WhenAll` | 等待所有 Task 完成；失敗時包成 AggregateException | 並行多個操作 |
 | `Task.Delay` | 非阻塞延遲 | 模擬 I/O，超時控制 |
+| `ConfigureAwait(false)` | 不嘗試回到原 SynchronizationContext | 函式庫程式碼避免死鎖 |
 | `SemaphoreSlim` | 限制併行度 | 限流、限制連接數 |
 | `CancellationToken` | 取消信號 | 支持優雅取消 |
 | `Channel<T>` | 線程安全隊列 | Producer-Consumer |
@@ -176,8 +181,11 @@ dotnet ./bin/Debug/net10.0/AsyncAwaitTutorial.dll
 // ❌ 死鎖
 var data = FetchDataAsync().Result;
 
-// ✓ 正確
+// ✓ 正確（應用程式碼）
 var data = await FetchDataAsync();
+
+// ✓ 正確（函式庫程式碼，避免死鎖）
+var data = await FetchDataAsync().ConfigureAwait(false);
 ```
 
 ### 陷阱 2：async void 無法捕捉例外
@@ -211,6 +219,24 @@ public async Task<long> Compute() => Fibonacci(30);
 
 // ✓ 正確
 public Task<long> Compute() => Task.Run(() => Fibonacci(30));
+```
+
+### 陷阱 5：誤解 Task.WhenAll 的例外處理
+
+```csharp
+// ⚠️ 常見誤解：以為 await 會拋出 AggregateException
+try {
+    await Task.WhenAll(task1, task2, task3);
+} catch (AggregateException ex) {  // ✗ 這個永遠不會被捕獲
+    // await 會展開 AggregateException
+}
+
+// ✓ 正確理解
+try {
+    await Task.WhenAll(task1, task2, task3);
+} catch (HttpRequestException ex) {  // ✓ 捕獲第一個失敗的具體例外
+    // 其他例外仍可從各 Task 的 Exception 屬性取得
+}
 ```
 
 ## 🎯 學習路徑建議
