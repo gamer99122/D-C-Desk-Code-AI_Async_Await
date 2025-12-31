@@ -447,7 +447,7 @@ public string GetData()
 
 **原因**：線程阻塞在 `.Result`，async 方法無法回到線程上下文執行
 
-**正確做法**：
+**正確做法 1（應用程式碼）**：
 ```csharp
 // ✓ 使用 await
 public async Task<string> GetData()
@@ -455,6 +455,20 @@ public async Task<string> GetData()
     return await FetchDataAsync();
 }
 ```
+
+**正確做法 2（函式庫程式碼）**：
+```csharp
+// ✓ 使用 ConfigureAwait(false) 避免死鎖
+public async Task<string> GetData()
+{
+    return await FetchDataAsync().ConfigureAwait(false);
+}
+```
+
+**說明**：
+- `ConfigureAwait(false)` 告訴 await 不要嘗試回到原 SynchronizationContext
+- 在函式庫程式碼中使用可避免死鎖，也能提升效能
+- 應用程式碼（特別是 UI）通常需要回到原執行緒，不應使用 `ConfigureAwait(false)`
 
 ### 2. 在 async void 中拋出例外，無法捕捉
 
@@ -542,6 +556,98 @@ foreach (var item in items)
 await Task.WhenAll(items.Select(ProcessAsync));
 ```
 
+### 6. 誤解 Task.WhenAll 的例外處理機制
+
+```csharp
+// ⚠️ 常見誤解：以為 await 會拋出 AggregateException
+try
+{
+    await Task.WhenAll(task1, task2, task3);
+}
+catch (AggregateException ex)
+{
+    // ✗ 這個 catch 永遠不會被執行！
+    // await 會展開 AggregateException
+}
+```
+
+**原因**：
+- `Task.WhenAll` 會將多個失敗任務的例外包裝成 `AggregateException`
+- 但 `await` 會**展開 (unwrap)** AggregateException，只拋出第一個 InnerException
+- 因此 catch 捕獲的是具體的例外類型，不是 AggregateException
+
+**正確做法**：
+```csharp
+// ✓ 捕獲具體例外類型
+try
+{
+    await Task.WhenAll(task1, task2, task3);
+}
+catch (HttpRequestException ex)
+{
+    // ✓ 捕獲第一個失敗任務的例外
+    Console.WriteLine($"捕獲到例外: {ex.Message}");
+}
+
+// ✓ 如需存取所有例外，檢查 Task 物件
+var whenAllTask = Task.WhenAll(task1, task2, task3);
+try
+{
+    await whenAllTask;
+}
+catch
+{
+    // 取得所有例外
+    var allExceptions = whenAllTask.Exception?.InnerExceptions;
+    foreach (var ex in allExceptions)
+    {
+        Console.WriteLine($"例外: {ex.Message}");
+    }
+}
+```
+
+### 7. 用 Task.Run 包裝同步阻塞操作的反模式
+
+```csharp
+// ❌ 錯誤示範：把阻塞轉移到 ThreadPool，並非真正的非同步
+public async Task<string> FetchDataAsync()
+{
+    return await Task.Run(() =>
+    {
+        Thread.Sleep(1000);  // 仍然阻塞 ThreadPool 線程
+        return "Data";
+    });
+}
+```
+
+**問題**：
+- 主執行緒沒有被阻塞（因為用了 await）
+- 但只是把阻塞操作轉移到 ThreadPool 的工作線程
+- 這**不是真正的非同步 I/O**，只是「異步等待一個阻塞操作」
+- 浪費 ThreadPool 線程資源
+
+**正確做法**：
+```csharp
+// ✓ 使用真正的非同步 I/O
+public async Task<string> FetchDataAsync()
+{
+    await Task.Delay(1000);  // 不阻塞任何線程
+    return "Data";
+}
+
+// ✓ 或使用非同步 API
+public async Task<string> FetchDataAsync()
+{
+    var response = await httpClient.GetStringAsync(url);  // 真正的非同步
+    return response;
+}
+```
+
+**何時可以用 Task.Run**：
+- CPU Bound 操作（計算密集），需要多線程並行
+- 在同步上下文中執行 async 方法（不常見的 workaround）
+- **不應用於**：I/O 操作（應使用非同步 API）
+
 ---
 
 ## 📊 效能數據示例
@@ -595,9 +701,16 @@ await Task.WhenAll(items.Select(ProcessAsync));
 
 ### 何時用 Task.Run
 
-✅ **用**：CPU Bound 操作
-✅ **用**：在同步上下文中執行 async 方法
-❌ **不用**：I/O 操作（直接 async）
+✅ **用**：CPU Bound 操作（計算密集）
+✅ **用**：在同步上下文中執行 async 方法（不常見）
+❌ **不用**：I/O 操作（直接使用非同步 API，不要用 Task.Run 包裝 Thread.Sleep）
+
+### 何時用 ConfigureAwait(false)
+
+✅ **用**：函式庫程式碼（不需要回到原 SynchronizationContext）
+✅ **用**：避免死鎖的情境
+❌ **不用**：應用程式碼（特別是 UI，需要回到原執行緒）
+❌ **不用**：需要特定同步上下文的情境
 
 ### 何時用 async void
 
