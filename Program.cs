@@ -343,7 +343,7 @@ async Task Example4_AsyncVoidVsAsyncTask()
     Console.WriteLine("   • Console app: 觸發 UnhandledException → Process Crash");
     Console.WriteLine("   • WPF: 觸發 DispatcherUnhandledException → 可攔截但需設定");
     Console.WriteLine("   • WinForms: 觸發 ThreadException → 可攔截但需設定");
-    Console.WriteLine("   • ASP.NET Core: 無 SynchronizationContext，例外拋到 ThreadPool → 預設會導致 Process Crash");
+    Console.WriteLine("   • ASP.NET Core: 無 SynchronizationContext，例外拋到 ThreadPool → 可能導致程序崩潰（取決於宿主設定）");
     Console.WriteLine();
 
     // 保存當前上下文
